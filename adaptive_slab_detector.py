@@ -7,17 +7,17 @@ from typing import Tuple, Dict, Any
 class AdaptiveSlabDetector:
     """Intelligent slab detection that adapts parameters based on image characteristics."""
 
-    def __init__(self, rulers_folder="rollers"):
-        self.rulers_folder = rulers_folder
+    def __init__(self, rollers_folder="rollers"):
+        self.rollers_folder = rollers_folder
         self.ruler_templates = self._load_ruler_templates()
 
     def _load_ruler_templates(self):
         """Load ruler templates for background matching."""
         templates = {}
-        if os.path.exists(self.rulers_folder):
-            for file in os.listdir(self.rulers_folder):
+        if os.path.exists(self.rollers_folder):
+            for file in os.listdir(self.rollers_folder):
                 if file.endswith((".JPG", ".jpg")):
-                    template_path = os.path.join(self.rulers_folder, file)
+                    template_path = os.path.join(self.rollers_folder, file)
                     template = cv2.imread(template_path)
                     if template is not None:
                         templates[file] = template

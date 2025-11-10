@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 import xml.etree.ElementTree as ET
 from rembg import remove
+from adaptive_slab_detector import AdaptiveSlabDetector
 
 # Set U2NET_HOME to bundled .u2net folder if running as a bundled app
 if getattr(sys, "frozen", False):
@@ -52,6 +53,18 @@ class PerfectSlabDetector:
 
         # Default DPI (250 DPI = ~9.84 pixels per mm)
         self.pixels_per_mm = tk.DoubleVar(value=9.84)  # 250 DPI default
+
+        # Initialize Adaptive Slab Detector
+        try:
+            self.adaptive_detector = AdaptiveSlabDetector(rollers_folder="rollers")
+            print("Adaptive Slab Detector initialized successfully")
+            if self.adaptive_detector.ruler_templates:
+                print(
+                    f"Loaded {len(self.adaptive_detector.ruler_templates)} ruler templates"
+                )
+        except Exception as e:
+            print(f"Warning: Could not initialize Adaptive Slab Detector: {e}")
+            self.adaptive_detector = None
 
         # Initialize SAM if available
         self._initialize_sam()
@@ -298,7 +311,10 @@ class PerfectSlabDetector:
             ext_mm = self._pixels_to_mm(external_rect)
             int_mm = self._pixels_to_mm(internal_rect)
 
+            # Include adaptive detection info if available
             status_text = f"Detection complete! Coverage: {final_coverage:.1f}%\n"
+            if hasattr(self, "current_analysis"):
+                status_text += f"Stone: {self.current_analysis['stone_type']}, BG: {self.current_analysis['background_type']}\n"
             status_text += f"External: {external_rect[2]}x{external_rect[3]}px ({ext_mm[2]:.1f}x{ext_mm[3]:.1f}mm)\n"
             status_text += f"Internal: {internal_rect[2]}x{internal_rect[3]}px ({int_mm[2]:.1f}x{int_mm[3]:.1f}mm)"
 
@@ -323,7 +339,7 @@ class PerfectSlabDetector:
         )
 
     def _apply_u2net(self, input_image):
-        """Apply U2NET background removal."""
+        """Apply U2NET background removal with adaptive parameters."""
 
         orig_h, orig_w = input_image.shape[:2]
 
@@ -334,16 +350,55 @@ class PerfectSlabDetector:
         )
         img_rgb_small = cv2.cvtColor(img_small, cv2.COLOR_BGR2RGB)
 
+        # Use adaptive detector if available
+        if self.adaptive_detector:
+            # Analyze image characteristics using adaptive detector
+            analysis = self.adaptive_detector.analyze_image_characteristics(
+                img_rgb_small
+            )
+            params = self.adaptive_detector.get_optimal_parameters(analysis)
+
+            # Log analysis results
+            print(f"Image Analysis:")
+            print(f"  Stone type: {analysis['stone_type']}")
+            print(f"  Background type: {analysis['background_type']}")
+            print(f"  Avg brightness: {analysis['avg_brightness']:.1f}")
+            print(f"  Alpha threshold: {params['alpha_threshold']}")
+            print(f"  Morph kernel size: {params['morph_kernel_size']}")
+
+            # Preprocess image if needed (e.g., for colored rulers)
+            img_preprocessed = self.adaptive_detector.preprocess_image_for_rembg(
+                img_rgb_small, params
+            )
+
+            # Store analysis and params for use in other methods
+            self.current_analysis = analysis
+            self.current_params = params
+            alpha_threshold = params["alpha_threshold"]
+        else:
+            # Fallback to simple processing
+            img_preprocessed = img_rgb_small
+            alpha_threshold = 0.1
+            print("Using default parameters (adaptive detector not available)")
+
         # Apply U2NET via rembg
-        processed_img_small = remove(img_rgb_small)
+        processed_img_small = remove(img_preprocessed)
         processed_img_small = np.array(processed_img_small)
 
         if processed_img_small.shape[-1] == 3:
             processed_img_small = cv2.cvtColor(processed_img_small, cv2.COLOR_RGB2RGBA)
 
-        # Extract mask and upscale
+        # Extract mask with adaptive threshold
         alpha_small = processed_img_small[:, :, 3] / 255.0
-        mask_small = (alpha_small > 0.1).astype(np.uint8) * 255
+        mask_small = (alpha_small > alpha_threshold).astype(np.uint8) * 255
+
+        # Apply adaptive postprocessing if available
+        if self.adaptive_detector and hasattr(self, "current_params"):
+            mask_small = self.adaptive_detector.postprocess_mask(
+                mask_small, self.current_params
+            )
+
+        # Upscale back to original size
         u2net_mask = cv2.resize(
             mask_small, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
         )
@@ -458,23 +513,49 @@ class PerfectSlabDetector:
             return self._post_process_mask(u2net_mask)
 
     def _enhance_u2net_mask(self, u2net_mask):
-        """Significantly enhance U2NET mask for much better results."""
-        print("Applying intelligent U2NET enhancement...")
+        """Significantly enhance U2NET mask for much better results using adaptive parameters."""
+        print("Applying intelligent U2NET enhancement with adaptive parameters...")
 
         # Get original image for enhancement
         input_image = cv2.imread(self.file_path)
         h, w = input_image.shape[:2]
 
-        # Step 1: Improve U2NET mask with morphological operations
+        # Use adaptive parameters if available
+        if hasattr(self, "current_params"):
+            params = self.current_params
+            analysis = self.current_analysis
+            kernel_size = params.get("morph_kernel_size", 15)
+            fill_aggressively = params.get("fill_holes_aggressively", False)
+            stone_type = analysis.get("stone_type", "medium_stone")
+        else:
+            kernel_size = 15
+            fill_aggressively = False
+            stone_type = "medium_stone"
+
+        # Step 1: Improve U2NET mask with adaptive morphological operations
         enhanced_mask = u2net_mask.copy()
 
-        # Close gaps in the slab detection
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        # Close gaps in the slab detection with adaptive kernel size
+        kernel_close = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+        )
         enhanced_mask = cv2.morphologyEx(enhanced_mask, cv2.MORPH_CLOSE, kernel_close)
 
         # Fill holes inside the slab
-        kernel_fill = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+        kernel_fill = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (kernel_size + 10, kernel_size + 10)
+        )
         enhanced_mask = cv2.morphologyEx(enhanced_mask, cv2.MORPH_CLOSE, kernel_fill)
+
+        # Aggressive filling for light stones
+        if fill_aggressively:
+            large_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (kernel_size + 15, kernel_size + 15)
+            )
+            enhanced_mask = cv2.morphologyEx(
+                enhanced_mask, cv2.MORPH_CLOSE, large_kernel
+            )
+            print(f"Applied aggressive hole filling for {stone_type}")
 
         # Step 2: Color-based enhancement using slab characteristics
         if np.sum(enhanced_mask > 0) > 0:
@@ -486,9 +567,19 @@ class PerfectSlabDetector:
                 slab_mean = np.mean(slab_pixels, axis=0)
                 slab_std = np.std(slab_pixels, axis=0)
 
-                # Create color-based mask with wider tolerance
-                color_lower = np.maximum(0, slab_mean - 2.5 * slab_std)
-                color_upper = np.minimum(255, slab_mean + 2.5 * slab_std)
+                # Adaptive tolerance based on stone type
+                if stone_type == "light_uniform":
+                    tolerance_factor = 3.0  # Wider tolerance for uniform light stones
+                elif stone_type == "light_veined":
+                    tolerance_factor = 2.8  # Wide tolerance for veined light stones
+                elif stone_type == "dark_stone":
+                    tolerance_factor = 2.2  # Narrower tolerance for dark stones
+                else:
+                    tolerance_factor = 2.5  # Default
+
+                # Create color-based mask with adaptive tolerance
+                color_lower = np.maximum(0, slab_mean - tolerance_factor * slab_std)
+                color_upper = np.minimum(255, slab_mean + tolerance_factor * slab_std)
 
                 color_mask = cv2.inRange(
                     input_image,
@@ -496,28 +587,37 @@ class PerfectSlabDetector:
                     color_upper.astype(np.uint8),
                 )
 
-                # Step 3: HSV-based stone detection
+                # Step 3: HSV-based stone detection with adaptive ranges
                 hsv = cv2.cvtColor(input_image, cv2.COLOR_BGR2HSV)
 
-                # Stone materials typically have:
-                # - Lower saturation (natural colors)
-                # - Moderate value (not too dark/bright)
-                lower_stone = np.array([0, 0, 30])
-                upper_stone = np.array([180, 120, 220])
+                if stone_type in ["light_uniform", "light_veined"]:
+                    # For light stones: wider saturation range, higher value range
+                    lower_stone = np.array([0, 0, 40])
+                    upper_stone = np.array([180, 100, 255])
+                elif stone_type == "dark_stone":
+                    # For dark stones: lower value range
+                    lower_stone = np.array([0, 0, 20])
+                    upper_stone = np.array([180, 150, 180])
+                else:
+                    # Default: moderate ranges
+                    lower_stone = np.array([0, 0, 30])
+                    upper_stone = np.array([180, 120, 220])
+
                 hsv_mask = cv2.inRange(hsv, lower_stone, upper_stone)
 
-                # Step 4: Combine all enhancement methods
-                # Weight U2NET heavily, but enhance with color and HSV
+                # Step 4: Combine all enhancement methods with adaptive weighting
                 combined = np.zeros((h, w), dtype=np.float32)
-                combined += (
-                    enhanced_mask.astype(np.float32) * 0.6
-                )  # Primary: Enhanced U2NET
-                combined += (
-                    color_mask.astype(np.float32) * 0.3
-                )  # Secondary: Color similarity
-                combined += (
-                    hsv_mask.astype(np.float32) * 0.1
-                )  # Tertiary: Stone detection
+
+                if stone_type in ["light_uniform", "light_veined"]:
+                    # For light stones: rely more on color and HSV
+                    combined += enhanced_mask.astype(np.float32) * 0.5
+                    combined += color_mask.astype(np.float32) * 0.35
+                    combined += hsv_mask.astype(np.float32) * 0.15
+                else:
+                    # For other stones: rely more on U2NET
+                    combined += enhanced_mask.astype(np.float32) * 0.6
+                    combined += color_mask.astype(np.float32) * 0.3
+                    combined += hsv_mask.astype(np.float32) * 0.1
 
                 # Threshold and clean
                 _, final_mask = cv2.threshold(combined, 150, 255, cv2.THRESH_BINARY)
@@ -531,17 +631,28 @@ class PerfectSlabDetector:
                 enhanced_coverage = (np.sum(final_mask > 0) / (h * w)) * 100
 
                 print(
-                    f"Enhancement: {original_coverage:.1f}% -> {enhanced_coverage:.1f}%"
+                    f"Enhancement: {original_coverage:.1f}% -> {enhanced_coverage:.1f}% (stone: {stone_type})"
                 )
 
-                # Only use enhancement if it's reasonable
+                # Adaptive validation based on stone type
+                if stone_type in ["light_uniform", "light_veined"]:
+                    # More permissive for light stones
+                    min_ratio = 0.4
+                    max_coverage = 95
+                else:
+                    # Standard validation
+                    min_ratio = 0.5
+                    max_coverage = 90
+
                 if (
-                    enhanced_coverage > original_coverage * 0.5
-                    and enhanced_coverage < 90
+                    enhanced_coverage > original_coverage * min_ratio
+                    and enhanced_coverage < max_coverage
                 ):
                     return final_mask
                 else:
-                    print("Enhancement rejected, using original U2NET")
+                    print(
+                        f"Enhancement rejected (ratio: {enhanced_coverage / max(original_coverage, 1):.2f}), using post-processed U2NET"
+                    )
 
         # Fallback: just post-process original
         return self._post_process_mask(enhanced_mask)
@@ -890,6 +1001,27 @@ class PerfectSlabDetector:
 
         # Add DPI information
         ET.SubElement(root, "PIXELS_PER_MM").text = f"{self.pixels_per_mm.get():.2f}"
+
+        # Add adaptive detection metadata if available
+        if hasattr(self, "current_analysis"):
+            detection_elem = ET.SubElement(root, "DETECTION_INFO")
+            ET.SubElement(detection_elem, "STONE_TYPE").text = str(
+                self.current_analysis.get("stone_type", "")
+            )
+            ET.SubElement(detection_elem, "BACKGROUND_TYPE").text = str(
+                self.current_analysis.get("background_type", "")
+            )
+            ET.SubElement(
+                detection_elem, "AVG_BRIGHTNESS"
+            ).text = f"{self.current_analysis.get('avg_brightness', 0):.2f}"
+
+            if hasattr(self, "current_params"):
+                ET.SubElement(
+                    detection_elem, "ALPHA_THRESHOLD"
+                ).text = f"{self.current_params.get('alpha_threshold', 0):.3f}"
+                ET.SubElement(detection_elem, "MORPH_KERNEL_SIZE").text = str(
+                    self.current_params.get("morph_kernel_size", 0)
+                )
 
         tree = ET.ElementTree(root)
         tree.write(xml_path, encoding="utf-8", xml_declaration=True)
