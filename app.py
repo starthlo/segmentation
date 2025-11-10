@@ -9,6 +9,7 @@ from datetime import datetime
 import xml.etree.ElementTree as ET
 from rembg import remove
 from adaptive_slab_detector import AdaptiveSlabDetector
+from multi_strategy_detector import MultiStrategyDetector
 
 # Set U2NET_HOME to bundled .u2net folder if running as a bundled app
 if getattr(sys, "frozen", False):
@@ -65,6 +66,10 @@ class PerfectSlabDetector:
         except Exception as e:
             print(f"Warning: Could not initialize Adaptive Slab Detector: {e}")
             self.adaptive_detector = None
+
+        # Initialize Multi-Strategy Detector
+        self.multi_strategy = MultiStrategyDetector(self.adaptive_detector)
+        print("Multi-Strategy Detector initialized")
 
         # Initialize SAM if available
         self._initialize_sam()
@@ -315,6 +320,8 @@ class PerfectSlabDetector:
             status_text = f"Detection complete! Coverage: {final_coverage:.1f}%\n"
             if hasattr(self, "current_analysis"):
                 status_text += f"Stone: {self.current_analysis['stone_type']}, BG: {self.current_analysis['background_type']}\n"
+            if hasattr(self, "detection_strategy"):
+                status_text += f"Strategy: {self.detection_strategy} (Q={self.detection_quality:.2f})\n"
             status_text += f"External: {external_rect[2]}x{external_rect[3]}px ({ext_mm[2]:.1f}x{ext_mm[3]:.1f}mm)\n"
             status_text += f"Internal: {internal_rect[2]}x{internal_rect[3]}px ({int_mm[2]:.1f}x{int_mm[3]:.1f}mm)"
 
@@ -339,7 +346,7 @@ class PerfectSlabDetector:
         )
 
     def _apply_u2net(self, input_image):
-        """Apply U2NET background removal with adaptive parameters."""
+        """Apply U2NET background removal with multi-strategy approach."""
 
         orig_h, orig_w = input_image.shape[:2]
 
@@ -366,37 +373,32 @@ class PerfectSlabDetector:
             print(f"  Alpha threshold: {params['alpha_threshold']}")
             print(f"  Morph kernel size: {params['morph_kernel_size']}")
 
-            # Preprocess image if needed (e.g., for colored rulers)
-            img_preprocessed = self.adaptive_detector.preprocess_image_for_rembg(
-                img_rgb_small, params
-            )
-
             # Store analysis and params for use in other methods
             self.current_analysis = analysis
             self.current_params = params
-            alpha_threshold = params["alpha_threshold"]
+            
+            # Use multi-strategy detector
+            mask_small, strategy_name, quality = self.multi_strategy.apply_u2net_with_strategies(
+                img_rgb_small, analysis, params
+            )
+            
+            # Store quality info
+            self.detection_quality = quality
+            self.detection_strategy = strategy_name
+            
         else:
             # Fallback to simple processing
-            img_preprocessed = img_rgb_small
-            alpha_threshold = 0.1
             print("Using default parameters (adaptive detector not available)")
+            alpha_threshold = 0.1
+            
+            processed_img_small = remove(img_rgb_small)
+            processed_img_small = np.array(processed_img_small)
 
-        # Apply U2NET via rembg
-        processed_img_small = remove(img_preprocessed)
-        processed_img_small = np.array(processed_img_small)
+            if processed_img_small.shape[-1] == 3:
+                processed_img_small = cv2.cvtColor(processed_img_small, cv2.COLOR_RGB2RGBA)
 
-        if processed_img_small.shape[-1] == 3:
-            processed_img_small = cv2.cvtColor(processed_img_small, cv2.COLOR_RGB2RGBA)
-
-        # Extract mask with adaptive threshold
-        alpha_small = processed_img_small[:, :, 3] / 255.0
-        mask_small = (alpha_small > alpha_threshold).astype(np.uint8) * 255
-
-        # Apply adaptive postprocessing if available
-        if self.adaptive_detector and hasattr(self, "current_params"):
-            mask_small = self.adaptive_detector.postprocess_mask(
-                mask_small, self.current_params
-            )
+            alpha_small = processed_img_small[:, :, 3] / 255.0
+            mask_small = (alpha_small > alpha_threshold).astype(np.uint8) * 255
 
         # Upscale back to original size
         u2net_mask = cv2.resize(
@@ -1074,6 +1076,10 @@ class PerfectSlabDetector:
                 ET.SubElement(detection_elem, "MORPH_KERNEL_SIZE").text = str(
                     self.current_params.get("morph_kernel_size", 0)
                 )
+            
+            if hasattr(self, "detection_strategy"):
+                ET.SubElement(detection_elem, "DETECTION_STRATEGY").text = str(self.detection_strategy)
+                ET.SubElement(detection_elem, "DETECTION_QUALITY").text = f"{self.detection_quality:.3f}"
 
         tree = ET.ElementTree(root)
         tree.write(xml_path, encoding="utf-8", xml_declaration=True)
