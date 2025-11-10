@@ -337,6 +337,67 @@ class AdaptiveSlabDetector:
 
         return processed_image
 
+    def evaluate_mask_quality(self, mask: np.ndarray, image: np.ndarray) -> Dict[str, float]:
+        """
+        Evaluate the quality of a detection mask.
+        Returns scores for different quality metrics.
+        """
+        h, w = mask.shape
+        
+        # 1. Coverage ratio (should be reasonable, not too small or too large)
+        coverage = np.sum(mask > 0) / (h * w)
+        coverage_score = 1.0
+        if coverage < 0.1:  # Too small
+            coverage_score = coverage / 0.1
+        elif coverage > 0.85:  # Too large (likely including background)
+            coverage_score = (1.0 - coverage) / 0.15
+        
+        # 2. Contour quality (should have one main contour)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) == 0:
+            return {'overall': 0.0, 'coverage': 0.0, 'contour': 0.0, 'shape': 0.0, 'edge': 0.0}
+        
+        largest_area = max([cv2.contourArea(c) for c in contours])
+        total_area = np.sum(mask > 0)
+        main_contour_ratio = largest_area / max(total_area, 1)
+        contour_score = main_contour_ratio  # Should be close to 1.0
+        
+        # 3. Shape quality (should be roughly rectangular/convex)
+        largest_contour = max(contours, key=cv2.contourArea)
+        hull = cv2.convexHull(largest_contour)
+        hull_area = cv2.contourArea(hull)
+        solidity = largest_area / max(hull_area, 1) if hull_area > 0 else 0
+        shape_score = solidity  # Should be > 0.7 for rectangular slabs
+        
+        # 4. Edge alignment (mask edges should align with image edges)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if len(image.shape) == 3 else image
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Get mask boundary
+        boundary = cv2.Canny(mask, 100, 200)
+        
+        # Check overlap between mask boundary and image edges
+        edge_overlap = np.sum(cv2.bitwise_and(boundary, edges) > 0)
+        boundary_pixels = np.sum(boundary > 0)
+        edge_score = edge_overlap / max(boundary_pixels, 1)
+        
+        # Overall score (weighted combination)
+        overall = (
+            coverage_score * 0.3 +
+            contour_score * 0.3 +
+            shape_score * 0.25 +
+            edge_score * 0.15
+        )
+        
+        return {
+            'overall': overall,
+            'coverage': coverage_score,
+            'contour': contour_score,
+            'shape': shape_score,
+            'edge': edge_score,
+            'raw_coverage': coverage
+        }
+
     def postprocess_mask(self, mask: np.ndarray, params: Dict[str, Any]) -> np.ndarray:
         """Post-process the detection mask to improve results."""
         if not params.get("use_postprocessing", True):
