@@ -7,7 +7,7 @@ from typing import Tuple, Dict, Any
 class AdaptiveSlabDetector:
     """Intelligent slab detection that adapts parameters based on image characteristics."""
 
-    def __init__(self, rulers_folder="rullers"):
+    def __init__(self, rulers_folder="rollers"):
         self.rulers_folder = rulers_folder
         self.ruler_templates = self._load_ruler_templates()
 

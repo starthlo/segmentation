@@ -166,7 +166,7 @@ class BackgroundRemoverApp:
         # Initialize adaptive detector
         if ADAPTIVE_DETECTOR_AVAILABLE:
             try:
-                self.adaptive_detector = AdaptiveSlabDetector("rullers")
+                self.adaptive_detector = AdaptiveSlabDetector("rollers")
                 print("Adaptive slab detector initialized successfully")
             except Exception as e:
                 print(f"Failed to initialize adaptive detector: {e}")
@@ -177,9 +177,9 @@ class BackgroundRemoverApp:
         # Initialize advanced ruler background remover if available
         if ADVANCED_REMOVER_AVAILABLE:
             try:
-                self.advanced_ruler_remover = AdvancedRulerBackgroundRemover("rullers")
-                self.effective_remover = EffectiveSlabRemover("rullers")
-                self.stone_only_remover = StoneOnlyRemover("rullers")
+                self.advanced_ruler_remover = AdvancedRulerBackgroundRemover("rollers")
+                self.effective_remover = EffectiveSlabRemover("rollers")
+                self.stone_only_remover = StoneOnlyRemover("rollers")
                 self.enhanced_rembg_remover = EnhancedREMBGRemover()
                 print(
                     "Advanced, effective, stone-only, and enhanced REMBG removers initialized successfully"
@@ -1540,7 +1540,7 @@ class BackgroundRemoverApp:
 
         # Load current rulers
         try:
-            ruler_files = glob.glob(os.path.join("rullers", "*.JPG"))
+            ruler_files = glob.glob(os.path.join("rollers", "*.JPG"))
             for ruler_file in ruler_files:
                 ruler_listbox.insert(tk.END, os.path.basename(ruler_file))
         except:
@@ -1558,8 +1558,8 @@ class BackgroundRemoverApp:
             if file_path:
                 import shutil
 
-                os.makedirs("rullers", exist_ok=True)
-                dest_path = os.path.join("rullers", os.path.basename(file_path))
+                os.makedirs("rollers", exist_ok=True)
+                dest_path = os.path.join("rollers", os.path.basename(file_path))
                 shutil.copy2(file_path, dest_path)
                 ruler_listbox.insert(tk.END, os.path.basename(file_path))
                 messagebox.showinfo(
@@ -1572,7 +1572,7 @@ class BackgroundRemoverApp:
                 ruler_name = ruler_listbox.get(selection[0])
                 if messagebox.askyesno("Confirm", f"Remove ruler image: {ruler_name}?"):
                     try:
-                        os.remove(os.path.join("rullers", ruler_name))
+                        os.remove(os.path.join("rollers", ruler_name))
                         ruler_listbox.delete(selection[0])
                         messagebox.showinfo(
                             "Success", f"Ruler image removed: {ruler_name}"
