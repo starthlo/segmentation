@@ -1,0 +1,101 @@
+{
+  "summary": {
+    "total": 15,
+    "successful": 0,
+    "success_rate": 0.0,
+    "average_quality": 0
+  },
+  "by_type": {},
+  "detailed_results": [
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-1.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-1.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.048735"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-10.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-10.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.164955"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-11.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-11.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.279577"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-12.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-12.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.391475"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-2.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-2.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.506574"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-3.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-3.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.625206"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-4.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-4.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.738063"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-5.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-5.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.852109"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-6.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-6.JPG\"",
+      "timestamp": "2025-09-19T05:04:53.968708"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-7.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-7.JPG\"",
+      "timestamp": "2025-09-19T05:04:54.084661"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-8.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-8.JPG\"",
+      "timestamp": "2025-09-19T05:04:54.202287"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM001184-9.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM001184-9.JPG\"",
+      "timestamp": "2025-09-19T05:04:54.317733"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM002115-1.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM002115-1.JPG\"",
+      "timestamp": "2025-09-19T05:04:54.399115"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM002115-17.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM002115-17.JPG\"",
+      "timestamp": "2025-09-19T05:04:54.476920"
+    },
+    {
+      "image_path": "temp\\AL_AJIAL_FACTORY-BLKM002115-18.JPG",
+      "success": false,
+      "error": "couldn't recognize data in image file \"temp\\AL_AJIAL_FACTORY-BLKM002115-18.JPG\"",
+      "timestamp": "2025-09-19T05:04:54.556824"
+    }
+  ]
+}
