@@ -124,6 +124,7 @@ class AdaptiveSlabDetector:
             "rect_scale_factor": 5,
             "use_improved_contours": True,
             "fill_holes_aggressively": False,
+            "analysis": analysis,  # Pass analysis to preprocessing
         }
 
         # Adjust for stone type
@@ -162,8 +163,97 @@ class AdaptiveSlabDetector:
             params["use_preprocessing"] = True
             params["ruler_colors"] = ["blue"]
             params["min_contour_ratio"] = 0.01
+        elif background_type == "minimal_equipment":
+            # Always use preprocessing for minimal equipment to catch similar-color rollers
+            params["use_preprocessing"] = True
+            params["ruler_colors"] = []  # No specific colors, use advanced detection
 
         return params
+
+    def detect_roller_regions_advanced(
+        self, image: np.ndarray, analysis: Dict[str, Any]
+    ) -> np.ndarray:
+        """
+        Advanced roller detection using texture, edges, and spatial analysis.
+        Works even when roller and stone colors are similar.
+        """
+        h, w = image.shape[:2]
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        
+        # Create combined mask for roller regions
+        roller_mask = np.zeros((h, w), dtype=np.uint8)
+        
+        # Method 1: Edge-based detection (rollers have strong geometric edges)
+        edges = cv2.Canny(gray, 30, 100)
+        
+        # Detect lines (rollers typically have parallel lines/stripes)
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, 
+                                minLineLength=min(w, h)//10, maxLineGap=10)
+        
+        line_mask = np.zeros((h, w), dtype=np.uint8)
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(line_mask, (x1, y1), (x2, y2), 255, 5)
+        
+        # Method 2: Texture-based detection (rollers have mechanical patterns)
+        # Calculate local standard deviation (texture measure)
+        kernel_size = 15
+        mean = cv2.blur(gray.astype(np.float32), (kernel_size, kernel_size))
+        sqr_mean = cv2.blur(gray.astype(np.float32)**2, (kernel_size, kernel_size))
+        std_dev = np.sqrt(np.abs(sqr_mean - mean**2))
+        
+        # Rollers have lower texture variance (more uniform/mechanical)
+        # Stones have higher texture variance (natural patterns)
+        texture_threshold = np.percentile(std_dev, 30)  # Bottom 30% = mechanical
+        low_texture_mask = (std_dev < texture_threshold).astype(np.uint8) * 255
+        
+        # Method 3: Spatial analysis (rollers are on edges/borders)
+        edge_width = max(10, min(w, h) // 20)
+        spatial_mask = np.zeros((h, w), dtype=np.uint8)
+        spatial_mask[:edge_width, :] = 255  # Top edge
+        spatial_mask[-edge_width:, :] = 255  # Bottom edge
+        spatial_mask[:, :edge_width] = 255  # Left edge
+        spatial_mask[:, -edge_width:] = 255  # Right edge
+        
+        # Method 4: Frequency analysis (rollers have repetitive patterns)
+        # Use Fourier transform to detect periodic patterns
+        dft = cv2.dft(np.float32(gray), flags=cv2.DFT_COMPLEX_OUTPUT)
+        dft_shift = np.fft.fftshift(dft)
+        magnitude = cv2.magnitude(dft_shift[:,:,0], dft_shift[:,:,1])
+        
+        # High frequency content indicates repetitive patterns (rollers)
+        freq_mask = np.zeros((h, w), dtype=np.uint8)
+        center_y, center_x = h // 2, w // 2
+        if magnitude[center_y, center_x] > 0:
+            # Detect high-frequency regions
+            high_freq = magnitude > np.percentile(magnitude, 85)
+            freq_mask = high_freq.astype(np.uint8) * 255
+        
+        # Combine all methods with weights
+        combined = np.zeros((h, w), dtype=np.float32)
+        combined += line_mask.astype(np.float32) * 0.3  # Geometric lines
+        combined += low_texture_mask.astype(np.float32) * 0.25  # Low texture
+        combined += spatial_mask.astype(np.float32) * 0.25  # Edge regions
+        combined += freq_mask.astype(np.float32) * 0.2  # Periodic patterns
+        
+        # Threshold combined result
+        _, roller_mask = cv2.threshold(combined, 100, 255, cv2.THRESH_BINARY)
+        roller_mask = roller_mask.astype(np.uint8)
+        
+        # Clean up the mask
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        roller_mask = cv2.morphologyEx(roller_mask, cv2.MORPH_CLOSE, kernel)
+        roller_mask = cv2.morphologyEx(roller_mask, cv2.MORPH_OPEN, kernel)
+        
+        # Additional validation: remove regions that are too large (likely slab, not roller)
+        contours, _ = cv2.findContours(roller_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > (h * w * 0.4):  # If region is >40% of image, it's not a roller
+                cv2.drawContours(roller_mask, [contour], -1, 0, -1)
+        
+        return roller_mask
 
     def preprocess_image_for_rembg(
         self, image: np.ndarray, params: Dict[str, Any]
@@ -176,8 +266,8 @@ class AdaptiveSlabDetector:
         processed_image = image.copy()
         hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
 
-        # Create mask for ruler areas
-        ruler_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        # Create mask for ruler areas using color-based detection
+        color_ruler_mask = np.zeros(image.shape[:2], dtype=np.uint8)
 
         for color in ruler_colors:
             if color == "red":
@@ -199,11 +289,51 @@ class AdaptiveSlabDetector:
             else:
                 continue
 
-            ruler_mask = cv2.bitwise_or(ruler_mask, color_mask)
+            color_ruler_mask = cv2.bitwise_or(color_ruler_mask, color_mask)
+
+        # Get analysis info if available
+        analysis = params.get("analysis", {})
+        
+        # Use advanced detection for similar colors
+        # Check if stone and roller might have similar colors
+        use_advanced = False
+        if analysis:
+            stone_type = analysis.get('stone_type', '')
+            background_type = analysis.get('background_type', '')
+            
+            # Cases where colors might be similar:
+            # 1. Light stone with light/white rollers
+            # 2. Dark stone with dark rollers
+            # 3. Minimal color detection (no strong colored equipment)
+            if stone_type in ['light_uniform', 'light_veined'] and background_type == 'minimal_equipment':
+                use_advanced = True
+            elif stone_type == 'dark_stone' and background_type == 'minimal_equipment':
+                use_advanced = True
+            elif np.sum(color_ruler_mask) < (image.shape[0] * image.shape[1] * 0.01):
+                # Very little color detected, might be similar colors
+                use_advanced = True
+        
+        # Apply advanced detection if needed
+        if use_advanced:
+            print("  Using advanced roller detection (similar colors detected)")
+            advanced_mask = self.detect_roller_regions_advanced(image, analysis)
+            # Combine color-based and advanced detection
+            final_mask = cv2.bitwise_or(color_ruler_mask, advanced_mask)
+        else:
+            final_mask = color_ruler_mask
 
         # Replace ruler areas with neutral background
-        if np.sum(ruler_mask) > 0:
-            processed_image[ruler_mask > 0] = [240, 240, 240]
+        if np.sum(final_mask) > 0:
+            # Use inpainting for better blending instead of flat color
+            processed_image = cv2.inpaint(processed_image, final_mask, 3, cv2.INPAINT_TELEA)
+            
+            # Also add some Gaussian blur to the edges for smoother transition
+            mask_dilated = cv2.dilate(final_mask, np.ones((5,5), np.uint8), iterations=1)
+            edge_mask = cv2.subtract(mask_dilated, final_mask)
+            
+            if np.sum(edge_mask) > 0:
+                blurred = cv2.GaussianBlur(processed_image, (15, 15), 0)
+                processed_image = np.where(edge_mask[:,:,None] > 0, blurred, processed_image).astype(np.uint8)
 
         return processed_image
 

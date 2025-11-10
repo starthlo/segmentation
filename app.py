@@ -657,6 +657,49 @@ class PerfectSlabDetector:
         # Fallback: just post-process original
         return self._post_process_mask(enhanced_mask)
 
+    def _refine_mask_with_edges(self, mask, input_image):
+        """
+        Refine mask using edge detection to separate slab from similar-colored background.
+        """
+        # Convert to grayscale
+        gray = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
+        
+        # Detect strong edges (boundaries between slab and rollers)
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Dilate edges to create boundary regions
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        edges_dilated = cv2.dilate(edges, kernel, iterations=2)
+        
+        # Use edges to refine the mask
+        # Areas with strong edges near mask boundaries might be incorrect
+        mask_contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if mask_contours:
+            # Create a refined mask
+            refined_mask = mask.copy()
+            
+            # Check edge density around the mask boundary
+            boundary_mask = np.zeros_like(mask)
+            cv2.drawContours(boundary_mask, mask_contours, -1, 255, 10)
+            
+            # If there are strong edges at the boundary, the mask is likely good
+            edge_at_boundary = cv2.bitwise_and(edges_dilated, boundary_mask)
+            edge_density = np.sum(edge_at_boundary > 0) / max(np.sum(boundary_mask > 0), 1)
+            
+            print(f"  Edge density at boundary: {edge_density:.3f}")
+            
+            # If edge density is low, the mask might include roller regions
+            # Use morphological erosion to pull back from uncertain areas
+            if edge_density < 0.1:
+                print("  Low edge density - applying conservative mask refinement")
+                kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                refined_mask = cv2.erode(mask, kernel_erode, iterations=2)
+            
+            return refined_mask
+        
+        return mask
+
     def _post_process_mask(self, mask):
         """Post-process mask for clean results."""
 
@@ -675,6 +718,15 @@ class PerfectSlabDetector:
             largest_contour = max(contours, key=cv2.contourArea)
             final_mask = np.zeros_like(mask)
             cv2.fillPoly(final_mask, [largest_contour], 255)
+
+            # Refine with edge detection if we have the original image
+            if hasattr(self, 'file_path') and self.file_path:
+                try:
+                    input_image = cv2.imread(self.file_path)
+                    if input_image is not None and input_image.shape[:2] == mask.shape:
+                        final_mask = self._refine_mask_with_edges(final_mask, input_image)
+                except Exception as e:
+                    print(f"  Could not apply edge refinement: {e}")
 
             # Smooth edges
             final_mask = cv2.GaussianBlur(final_mask, (3, 3), 1)
