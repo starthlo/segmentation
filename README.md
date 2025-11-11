@@ -12,3 +12,11 @@ If you see this error on runtime - `ImportError: DLL load failed while importing
 Install Microsoft Visual C++ Redistributable (x64)
 Download & install this first:
 https://aka.ms/vs/17/release/vc_redist.x64.exe - This is required for onnxruntime on Windows.
+
+
+## SAM_MODEL
+
+Download the SAM model and store it in the **sam_models** folder.
+https://huggingface.co/HCMUE-Research/SAM-vit-h/blob/main/sam_vit_h_4b8939.pth
+or
+https://www.kaggle.com/datasets/simayyamuruysal/sam-vit-h-4b8939-pth
