@@ -16,46 +16,52 @@ class MultiStrategyDetector:
         self.adaptive_detector = adaptive_detector
         self.debug_mode = True  # Save intermediate results for debugging
         
-    def apply_u2net_with_strategies(self, img_rgb_small, analysis, params):
+    def apply_u2net_with_strategies(self, img_rgb, analysis, params):
         """
         Apply U2NET with multiple strategies and pick the best result.
+        Works at full resolution for maximum accuracy.
         Returns: (best_mask, strategy_name, quality_score)
         """
+        h, w = img_rgb.shape[:2]
+        print(f"  Multi-strategy detection at {w}x{h} resolution")
+        
         strategies = []
         
         # Strategy 1: With preprocessing (adaptive)
-        strategies.append(("Adaptive+Preprocess", lambda: self._strategy_with_preprocess(img_rgb_small, params)))
+        strategies.append(("Adaptive+Preprocess", lambda: self._strategy_with_preprocess(img_rgb, params)))
         
         # Strategy 2: Without preprocessing
-        strategies.append(("NoPreprocess", lambda: self._strategy_no_preprocess(img_rgb_small, params)))
+        strategies.append(("NoPreprocess", lambda: self._strategy_no_preprocess(img_rgb, params)))
         
         # Strategy 3: Conservative (higher threshold)
-        strategies.append(("Conservative", lambda: self._strategy_conservative(img_rgb_small, params)))
+        strategies.append(("Conservative", lambda: self._strategy_conservative(img_rgb, params)))
         
         # Strategy 4: Aggressive (lower threshold) - only for light stones
         if analysis.get('stone_type') in ['light_uniform', 'light_veined']:
-            strategies.append(("Aggressive", lambda: self._strategy_aggressive(img_rgb_small, params)))
+            strategies.append(("Aggressive", lambda: self._strategy_aggressive(img_rgb, params)))
         
         # Strategy 5: Multi-threshold fusion
-        strategies.append(("Multi-Threshold", lambda: self._strategy_multi_threshold(img_rgb_small, params)))
+        strategies.append(("Multi-Threshold", lambda: self._strategy_multi_threshold(img_rgb, params)))
         
         # Strategy 6: Edge-guided (uses edge detection)
-        strategies.append(("Edge-Guided", lambda: self._strategy_edge_guided(img_rgb_small, params)))
+        strategies.append(("Edge-Guided", lambda: self._strategy_edge_guided(img_rgb, params)))
         
         best_mask = None
         best_quality = 0.0
         best_strategy = None
         results = []
         
-        print(f"\n  === TESTING {len(strategies)} STRATEGIES ===")
+        print(f"\n  === TESTING {len(strategies)} STRATEGIES (Full Resolution) ===")
         
-        for strategy_name, strategy_func in strategies:
+        for i, (strategy_name, strategy_func) in enumerate(strategies, 1):
             try:
+                print(f"    [{i}/{len(strategies)}] Testing {strategy_name}...", end=' ', flush=True)
+                
                 mask = strategy_func()
                 
                 # Evaluate quality
                 if self.adaptive_detector:
-                    quality_metrics = self.adaptive_detector.evaluate_mask_quality(mask, img_rgb_small)
+                    quality_metrics = self.adaptive_detector.evaluate_mask_quality(mask, img_rgb)
                     quality = quality_metrics['overall']
                 else:
                     quality = self._simple_quality_score(mask)
@@ -63,7 +69,7 @@ class MultiStrategyDetector:
                 
                 coverage = quality_metrics['raw_coverage']
                 
-                print(f"    {strategy_name:20s}: quality={quality:.3f}, coverage={coverage:.2%}")
+                print(f"Q={quality:.3f}, Cov={coverage:.1%}")
                 
                 results.append({
                     'name': strategy_name,
@@ -72,9 +78,11 @@ class MultiStrategyDetector:
                     'coverage': coverage
                 })
                 
-                # Save debug images
+                # Save debug images (downsampled to save space)
                 if self.debug_mode:
-                    cv2.imwrite(f'debug_strategy_{strategy_name}.jpg', mask)
+                    h, w = mask.shape
+                    mask_small = cv2.resize(mask, (w//2, h//2), interpolation=cv2.INTER_NEAREST)
+                    cv2.imwrite(f'debug_strategy_{strategy_name}.jpg', mask_small)
                 
                 if quality > best_quality:
                     best_quality = quality

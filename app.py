@@ -346,23 +346,21 @@ class PerfectSlabDetector:
         )
 
     def _apply_u2net(self, input_image):
-        """Apply U2NET background removal with multi-strategy approach."""
+        """Apply U2NET background removal with multi-strategy approach at full resolution."""
 
         orig_h, orig_w = input_image.shape[:2]
-
-        # Downsample for U2NET processing (faster)
-        small_w, small_h = orig_w // 4, orig_h // 4
-        img_small = cv2.resize(
-            input_image, (small_w, small_h), interpolation=cv2.INTER_AREA
-        )
-        img_rgb_small = cv2.cvtColor(img_small, cv2.COLOR_BGR2RGB)
+        img_rgb = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
+        
+        print(f"Processing at full resolution: {orig_w}x{orig_h}")
 
         # Use adaptive detector if available
         if self.adaptive_detector:
-            # Analyze image characteristics using adaptive detector
-            analysis = self.adaptive_detector.analyze_image_characteristics(
-                img_rgb_small
-            )
+            # Analyze image characteristics using full resolution
+            # (or slightly downsampled only for analysis, not processing)
+            analysis_w, analysis_h = max(orig_w // 2, 512), max(orig_h // 2, 512)
+            img_analysis = cv2.resize(img_rgb, (analysis_w, analysis_h), interpolation=cv2.INTER_AREA)
+            
+            analysis = self.adaptive_detector.analyze_image_characteristics(img_analysis)
             params = self.adaptive_detector.get_optimal_parameters(analysis)
 
             # Log analysis results
@@ -377,9 +375,13 @@ class PerfectSlabDetector:
             self.current_analysis = analysis
             self.current_params = params
             
-            # Use multi-strategy detector
-            mask_small, strategy_name, quality = self.multi_strategy.apply_u2net_with_strategies(
-                img_rgb_small, analysis, params
+            # Scale morphology kernel for full resolution
+            params_fullres = params.copy()
+            params_fullres['morph_kernel_size'] = params['morph_kernel_size'] * 2  # Scale for full res
+            
+            # Use multi-strategy detector at FULL RESOLUTION
+            u2net_mask, strategy_name, quality = self.multi_strategy.apply_u2net_with_strategies(
+                img_rgb, analysis, params_fullres
             )
             
             # Store quality info
@@ -387,23 +389,18 @@ class PerfectSlabDetector:
             self.detection_strategy = strategy_name
             
         else:
-            # Fallback to simple processing
+            # Fallback to simple processing at full resolution
             print("Using default parameters (adaptive detector not available)")
             alpha_threshold = 0.1
             
-            processed_img_small = remove(img_rgb_small)
-            processed_img_small = np.array(processed_img_small)
+            processed_img = remove(img_rgb)
+            processed_img = np.array(processed_img)
 
-            if processed_img_small.shape[-1] == 3:
-                processed_img_small = cv2.cvtColor(processed_img_small, cv2.COLOR_RGB2RGBA)
+            if processed_img.shape[-1] == 3:
+                processed_img = cv2.cvtColor(processed_img, cv2.COLOR_RGB2RGBA)
 
-            alpha_small = processed_img_small[:, :, 3] / 255.0
-            mask_small = (alpha_small > alpha_threshold).astype(np.uint8) * 255
-
-        # Upscale back to original size
-        u2net_mask = cv2.resize(
-            mask_small, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
-        )
+            alpha = processed_img[:, :, 3] / 255.0
+            u2net_mask = (alpha > alpha_threshold).astype(np.uint8) * 255
 
         return u2net_mask
 

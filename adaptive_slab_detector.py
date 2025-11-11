@@ -429,20 +429,19 @@ class AdaptiveSlabDetector:
     def detect_slab_adaptive(
         self, image_path: str, rembg_function
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """Main adaptive detection function."""
+        """Main adaptive detection function at full resolution."""
         # Load and prepare image
         img = cv2.imread(image_path)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         orig_h, orig_w = img_rgb.shape[:2]
 
-        # Downscale for processing
-        small_w, small_h = orig_w // 4, orig_h // 4
-        img_small = cv2.resize(
-            img_rgb, (small_w, small_h), interpolation=cv2.INTER_AREA
-        )
+        print(f"Processing at full resolution: {orig_w}x{orig_h}")
 
-        # Analyze image characteristics
-        analysis = self.analyze_image_characteristics(img_small)
+        # Analyze image characteristics (can use downsampled for analysis)
+        analysis_w, analysis_h = max(orig_w // 2, 512), max(orig_h // 2, 512)
+        img_analysis = cv2.resize(img_rgb, (analysis_w, analysis_h), interpolation=cv2.INTER_AREA)
+        
+        analysis = self.analyze_image_characteristics(img_analysis)
         params = self.get_optimal_parameters(analysis)
 
         print("Image Analysis:")
@@ -452,40 +451,32 @@ class AdaptiveSlabDetector:
             f"  Parameters: alpha={params['alpha_threshold']}, kernel={params['morph_kernel_size']}"
         )
 
-        # Preprocess if needed
-        img_for_rembg = self.preprocess_image_for_rembg(img_small, params)
+        # Preprocess at full resolution
+        img_for_rembg = self.preprocess_image_for_rembg(img_rgb, params)
 
-        # Apply rembg
-        processed_img_small = rembg_function(img_for_rembg)
-        processed_img_small = np.array(processed_img_small).copy()
-        if processed_img_small.shape[-1] == 3:
-            processed_img_small = cv2.cvtColor(processed_img_small, cv2.COLOR_RGB2RGBA)
+        # Apply rembg at full resolution
+        processed_img = rembg_function(img_for_rembg)
+        processed_img = np.array(processed_img).copy()
+        if processed_img.shape[-1] == 3:
+            processed_img = cv2.cvtColor(processed_img, cv2.COLOR_RGB2RGBA)
 
-        alpha_small = processed_img_small[:, :, 3] / 255.0
+        alpha = processed_img[:, :, 3] / 255.0
 
         # Create mask with adaptive threshold
         alpha_threshold = params["alpha_threshold"]
-        mask_small = (alpha_small > alpha_threshold).astype(np.uint8) * 255
+        mask = (alpha > alpha_threshold).astype(np.uint8) * 255
 
-        # Post-process mask
-        mask_small = self.postprocess_mask(mask_small, params)
+        # Post-process mask (scale kernel for full resolution)
+        params_fullres = params.copy()
+        params_fullres['morph_kernel_size'] = params['morph_kernel_size'] * 2
+        mask = self.postprocess_mask(mask, params_fullres)
 
         # Quality check
-        slab_area_ratio = np.sum(mask_small > 0) / (
-            mask_small.shape[0] * mask_small.shape[1]
-        )
-        print(f"  Detection ratio: {slab_area_ratio:.2f}")
+        slab_area_ratio = np.sum(mask > 0) / (orig_w * orig_h)
+        print(f"  Detection ratio: {slab_area_ratio:.2%}")
 
-        # Upscale back to original size
-        mask_full = cv2.resize(
-            mask_small, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
-        )
-        processed_img_up = cv2.resize(
-            processed_img_small, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR
-        )
-
-        return processed_img_up, {
-            "mask": mask_full,
+        return processed_img, {
+            "mask": mask,
             "analysis": analysis,
             "parameters": params,
             "detection_ratio": slab_area_ratio,
